@@ -28,6 +28,10 @@ defmodule Degiro do
     GenServer.call(account, :get_portfolio)
   end
 
+  def search_product(account, search_query) do
+    GenServer.call(account, {:search_product, search_query})
+  end
+
   # SERVER API
 
   @impl GenServer
@@ -49,5 +53,10 @@ defmodule Degiro do
   @impl GenServer
   def handle_call(:get_portfolio, _, state) do
     {:reply, Api.get_portfolio(state), state}
+  end
+
+  @impl GenServer
+  def handle_call({:search_product, search_query}, _, state) do
+    {:reply, Api.search_product(state, search_query), state}
   end
 end
