@@ -97,6 +97,23 @@ defmodule Degiro.Api do
     end
   end
 
+  def get_product_by_id(state, product_ids) do
+    %{
+      "clientInfo" => %{"productSearchUrl" => productSearchUrl},
+      "account" => account,
+      "sessionId" => sessionId
+    } = state
+
+    url = "#{productSearchUrl}v5/products/info?intAccount=#{account}&sessionId=#{sessionId}"
+    body = product_ids |> Enum.map(&to_string/1) |> Poison.encode!()
+    headers = [{"Content-type", "application/json"}]
+
+    case HTTPoison.post(url, body, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
+      _ -> IO.puts("get_vwd_session error")
+    end
+  end
+
   def search_product(state, search_query) do
     %{
       "clientInfo" => %{"productSearchUrl" => productSearchUrl},

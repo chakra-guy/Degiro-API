@@ -36,6 +36,10 @@ defmodule Degiro do
     GenServer.call(account, {:get_ask_bid_price, vwd_product_id})
   end
 
+  def get_product_by_id(account, product_ids \\ ["15018973", 8_066_561]) do
+    GenServer.call(account, {:get_product_by_id, product_ids})
+  end
+
   def search_product(account, search_query) do
     GenServer.call(account, {:search_product, search_query})
   end
@@ -71,6 +75,11 @@ defmodule Degiro do
   @impl GenServer
   def handle_call({:get_ask_bid_price, vwd_product_id}, _, state) do
     {:reply, Api.get_ask_bid_price(state, vwd_product_id), state}
+  end
+
+  @impl GenServer
+  def handle_call({:get_product_by_id, product_ids}, _, state) do
+    {:reply, Api.get_product_by_id(state, product_ids), state}
   end
 
   @impl GenServer
