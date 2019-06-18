@@ -1,5 +1,6 @@
 defmodule Degiro.Api do
-  @base_url "https://trader.degiro.nl"
+  @degiro_url "https://trader.degiro.nl"
+  @degiro_vwd_services_url "https://degiro.quotecast.vwdservices.com/CORS/"
   @cookies_regex ~r/\Aset-cookie\z/i
   @product_types %{
     all: nil,
@@ -15,7 +16,7 @@ defmodule Degiro.Api do
   }
 
   def login(username, password) do
-    url = "#{@base_url}/login/secure/login"
+    url = "#{@degiro_url}/login/secure/login"
 
     loginParams = %{
       "username" => username,
@@ -26,6 +27,7 @@ defmodule Degiro.Api do
     }
 
     # TODO add oneTimePassword stuff
+    # FIXME use the "with" keyword for the login chains
 
     send_login_request(url, loginParams)
     |> update_config()
@@ -37,7 +39,11 @@ defmodule Degiro.Api do
     get_data(state, %{"portfolio" => 0}) |> get_in(["portfolio", "value"])
   end
 
-  defp get_data(state, options \\ %{}) do
+  def get_cash_funds(state) do
+    get_data(state, %{"cashFunds" => 0}) |> get_in(["cashFunds", "value"])
+  end
+
+  defp get_data(state, options) do
     %{
       "clientInfo" => %{"tradingUrl" => tradingUrl},
       "account" => account,
@@ -48,8 +54,46 @@ defmodule Degiro.Api do
     url = "#{tradingUrl}v5/update/#{account};jsessionid=#{sessionId}?#{params}"
 
     case HTTPoison.get(url) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> body |> Poison.decode!()
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
+      {:ok, %HTTPoison.Response{status_code: 201, body: body}} -> Poison.decode!(body)
       _ -> IO.puts("get_data error")
+    end
+  end
+
+  def get_ask_bid_price(state, vwd_product_id) do
+    %{"userToken" => userToken} = state
+    %{"sessionId" => vwdSessionId} = get_vwd_session(state)
+
+    controlData =
+      [
+        "req(#{vwd_product_id}.BidPrice);",
+        "req(#{vwd_product_id}.AskPrice);",
+        "req(#{vwd_product_id}.LastPrice);",
+        "req(#{vwd_product_id}.LastTime);"
+      ]
+      |> Enum.join()
+
+    url = "#{@degiro_vwd_services_url}#{vwdSessionId}"
+    body = Poison.encode!(%{"controlData" => controlData})
+    headers = [{"Origin", @degiro_url}]
+
+    with {:ok, %HTTPoison.Response{status_code: 200}} <- HTTPoison.post(url, body, headers),
+         {:ok, %HTTPoison.Response{status_code: 200, body: body}} <- HTTPoison.get(url) do
+      {:ok, Poison.decode!(body)}
+    else
+      {:error, %HTTPoison.Error{reason: reason}} -> IO.puts(reason)
+      _ -> IO.puts("get_ask_bid_price error")
+    end
+  end
+
+  defp get_vwd_session(%{"userToken" => userToken}) do
+    url = "#{@degiro_vwd_services_url}request_session?version=1.0.20170315&userToken=#{userToken}"
+    body = Poison.encode!(%{"referrer" => @degiro_url})
+    headers = [{"Origin", @degiro_url}]
+
+    case HTTPoison.post(url, body, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
+      _ -> IO.puts("get_vwd_session error")
     end
   end
 
@@ -61,26 +105,24 @@ defmodule Degiro.Api do
     } = state
 
     params =
-      %{
-        "searchText" => search_query,
-        "productTypeId" => @product_types.all,
-        "sortColumns" => nil,
-        "sortTypes" => nil,
-        "limit" => 7,
-        "offset" => 0
-      }
-      |> Map.to_list()
+      [
+        {"intAccount", account},
+        {"sessionId", sessionId},
+        {"searchText", search_query},
+        {"productTypeId", @product_types.all},
+        {"sortColumns", nil},
+        {"sortTypes", nil},
+        {"limit", 7},
+        {"offset", 0}
+      ]
       |> Enum.filter(fn {_, v} -> v != nil end)
       |> Enum.into(%{})
       |> URI.encode_query()
 
-    url =
-      "#{productSearchUrl}v5/products/lookup?intAccount=#{account}&sessionId=#{sessionId}&#{
-        params
-      }"
+    url = "#{productSearchUrl}v5/products/lookup?#{params}"
 
     case HTTPoison.get(url) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> body |> Poison.decode!()
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
       _ -> IO.puts("search_product error")
     end
   end
@@ -100,11 +142,11 @@ defmodule Degiro.Api do
 
   defp update_config(cookies) do
     [sessionId | _] = elem(cookies, 1) |> String.split(";")
-    url = "#{@base_url}/login/secure/config"
+    url = "#{@degiro_url}/login/secure/config"
     headers = [{"Cookie", "#{sessionId};"}]
 
     case HTTPoison.get(url, headers) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> body |> Poison.decode!()
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
       _ -> IO.puts("Login update config error")
     end
   end
