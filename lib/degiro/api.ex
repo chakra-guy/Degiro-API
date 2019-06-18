@@ -60,9 +60,8 @@ defmodule Degiro.Api do
     end
   end
 
-  def get_ask_bid_price(state, vwd_product_id) do
-    %{"userToken" => userToken} = state
-    %{"sessionId" => vwdSessionId} = get_vwd_session(state)
+  def get_ask_bid_price(%{"userToken" => userToken}, vwd_product_id) do
+    %{"sessionId" => vwdSessionId} = get_vwd_session(userToken)
 
     controlData =
       [
@@ -86,7 +85,7 @@ defmodule Degiro.Api do
     end
   end
 
-  defp get_vwd_session(%{"userToken" => userToken}) do
+  defp get_vwd_session(userToken) do
     url = "#{@degiro_vwd_services_url}request_session?version=1.0.20170315&userToken=#{userToken}"
     body = Poison.encode!(%{"referrer" => @degiro_url})
     headers = [{"Origin", @degiro_url}]
