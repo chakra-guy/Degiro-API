@@ -32,6 +32,32 @@ defmodule Degiro do
     GenServer.call(account, :get_cash_funds)
   end
 
+  def get_orders(account) do
+    GenServer.call(account, :get_orders)
+  end
+
+  def cancel_orders(account, orderId \\ "d1709040-96ea-4238-8c9d-5e3171a3478e") do
+    GenServer.call(account, {:cancel_orders, orderId})
+  end
+
+  def place_orders(account, options \\ nil) do
+    # FIXME add constants
+    defaultOptions = %{
+      # eMagin
+      "productId" => "7270524",
+      "buySell" => "BUY",
+      "orderType" => 0,
+      "timeType" => 3,
+      "size" => 1,
+      "price" => 0.3
+    }
+
+    case options do
+      nil -> GenServer.call(account, {:place_orders, defaultOptions})
+      _ -> GenServer.call(account, {:place_orders, options})
+    end
+  end
+
   def get_ask_bid_price(account, vwd_product_id \\ "591095107") do
     GenServer.call(account, {:get_ask_bid_price, vwd_product_id})
   end
@@ -70,6 +96,21 @@ defmodule Degiro do
   @impl GenServer
   def handle_call(:get_cash_funds, _, state) do
     {:reply, Api.get_cash_funds(state), state}
+  end
+
+  @impl GenServer
+  def handle_call(:get_orders, _, state) do
+    {:reply, Api.get_orders(state), state}
+  end
+
+  @impl GenServer
+  def handle_call({:cancel_orders, orderId}, _, state) do
+    {:reply, Api.cancel_orders(state, orderId), state}
+  end
+
+  @impl GenServer
+  def handle_call({:place_orders, options}, _, state) do
+    {:reply, Api.place_orders(state, options), state}
   end
 
   @impl GenServer

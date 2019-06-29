@@ -1,7 +1,7 @@
 defmodule Degiro.Api do
   @degiro_url "https://trader.degiro.nl"
   @degiro_vwd_services_url "https://degiro.quotecast.vwdservices.com/CORS/"
-  @cookies_regex ~r/\Aset-cookie\z/i
+  @cookie_regex ~r/\Aset-cookie\z/i
   @product_types %{
     all: nil,
     shares: 1,
@@ -43,20 +43,36 @@ defmodule Degiro.Api do
     get_data(state, %{"cashFunds" => 0}) |> get_in(["cashFunds", "value"])
   end
 
-  defp get_data(state, options) do
+  def get_orders(state) do
+    get_data(state, %{"orders" => 0, "historicalOrders" => 0, "transactions" => 0})
+  end
+
+  def cancel_orders(state, orderId) do
     %{
       "clientInfo" => %{"tradingUrl" => tradingUrl},
       "account" => account,
       "sessionId" => sessionId
     } = state
 
-    params = URI.encode_query(options)
-    url = "#{tradingUrl}v5/update/#{account};jsessionid=#{sessionId}?#{params}"
+    url =
+      "#{tradingUrl}v5/order/#{orderId};jsessionid=#{sessionId}?intAccount=#{account}&sessionId=#{
+        sessionId
+      }"
 
-    case HTTPoison.get(url) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
-      {:ok, %HTTPoison.Response{status_code: 201, body: body}} -> Poison.decode!(body)
-      _ -> IO.puts("get_data error")
+    headers = [{"Content-Type", "application/json;charset=UTF-8"}]
+
+    case HTTPoison.delete(url, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200}} -> {:ok, "cancel_orders success"}
+      _ -> {:error, "cancel_orders error"}
+    end
+  end
+
+  def place_orders(state, options) do
+    with {:ok, check_data} <- check_order({state, options}),
+         {:ok, confirm_data} <- confirm_order({state, check_data}) do
+      confirm_data
+    else
+      _ -> {:error, "place_orders error"}
     end
   end
 
@@ -80,19 +96,8 @@ defmodule Degiro.Api do
          {:ok, %HTTPoison.Response{status_code: 200, body: body}} <- HTTPoison.get(url) do
       {:ok, Poison.decode!(body)}
     else
-      {:error, %HTTPoison.Error{reason: reason}} -> IO.puts(reason)
-      _ -> IO.puts("get_ask_bid_price error")
-    end
-  end
-
-  defp get_vwd_session(userToken) do
-    url = "#{@degiro_vwd_services_url}request_session?version=1.0.20170315&userToken=#{userToken}"
-    body = Poison.encode!(%{"referrer" => @degiro_url})
-    headers = [{"Origin", @degiro_url}]
-
-    case HTTPoison.post(url, body, headers) do
-      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
-      _ -> IO.puts("get_vwd_session error")
+      {:error, %HTTPoison.Error{reason: reason}} -> {:error, reason}
+      _ -> {:error, "get_ask_bid_price error"}
     end
   end
 
@@ -109,7 +114,7 @@ defmodule Degiro.Api do
 
     case HTTPoison.post(url, body, headers) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
-      _ -> IO.puts("get_vwd_session error")
+      _ -> {:error, "get_vwd_session error"}
     end
   end
 
@@ -139,7 +144,90 @@ defmodule Degiro.Api do
 
     case HTTPoison.get(url) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
-      _ -> IO.puts("search_product error")
+      _ -> {:error, "search_product error"}
+    end
+  end
+
+  defp check_order({state, options}) do
+    %{
+      "clientInfo" => %{"tradingUrl" => tradingUrl},
+      "account" => account,
+      "sessionId" => sessionId
+    } = state
+
+    url =
+      "#{tradingUrl}v5/checkOrder;jsessionid=#{sessionId}?intAccount=#{account}&sessionId=#{
+        sessionId
+      }"
+
+    body = Poison.encode!(options)
+    headers = [{"Content-Type", "application/json;charset=UTF-8"}]
+
+    case HTTPoison.post(url, body, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        body
+        |> Poison.decode!()
+        |> Map.get("data")
+        |> Map.put("options", options)
+        |> (fn data -> {:ok, data} end).()
+
+      _ ->
+        {:error, "check_order error"}
+    end
+  end
+
+  defp confirm_order({state, %{"options" => options, "confirmationId" => confirmationId}}) do
+    %{
+      "clientInfo" => %{"tradingUrl" => tradingUrl},
+      "account" => account,
+      "sessionId" => sessionId
+    } = state
+
+    url =
+      "#{tradingUrl}v5/order/#{confirmationId};jsessionid=#{sessionId}?intAccount=#{account}&sessionId=#{
+        sessionId
+      }"
+
+    body = Poison.encode!(options)
+    headers = [{"Content-Type", "application/json;charset=UTF-8"}]
+
+    case HTTPoison.post(url, body, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
+        body
+        |> Poison.decode!()
+        |> Map.get("data")
+        |> (fn data -> {:ok, data} end).()
+
+      _ ->
+        {:error, "check_order error"}
+    end
+  end
+
+  defp get_data(state, options) do
+    %{
+      "clientInfo" => %{"tradingUrl" => tradingUrl},
+      "account" => account,
+      "sessionId" => sessionId
+    } = state
+
+    params = URI.encode_query(options)
+    url = "#{tradingUrl}v5/update/#{account};jsessionid=#{sessionId}?#{params}"
+
+    case HTTPoison.get(url) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
+      {:ok, %HTTPoison.Response{status_code: 201, body: body}} -> Poison.decode!(body)
+      _ -> {:error, "get_data error"}
+    end
+  end
+
+  defp get_vwd_session(userToken) do
+    url = "#{@degiro_vwd_services_url}request_session?version=1.0.20170315&userToken=#{userToken}"
+    body = Poison.encode!(%{"referrer" => @degiro_url})
+    headers = [{"Origin", @degiro_url}]
+
+    case HTTPoison.post(url, body, headers) do
+      {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
+      _ -> {:error, "get_vwd_session error"}
     end
   end
 
@@ -149,21 +237,21 @@ defmodule Degiro.Api do
 
     case HTTPoison.post(url, body, headers) do
       {:ok, %HTTPoison.Response{status_code: 200, headers: headers}} ->
-        headers |> Enum.find(fn {key, _} -> String.match?(key, @cookies_regex) end)
+        headers |> Enum.find(fn {key, _} -> String.match?(key, @cookie_regex) end)
 
       _ ->
-        IO.puts("Login error")
+        {:error, "Login error"}
     end
   end
 
-  defp update_config(cookies) do
-    [sessionId | _] = elem(cookies, 1) |> String.split(";")
+  defp update_config(cookie) do
+    sessionId = elem(cookie, 1) |> String.split(";") |> hd()
     url = "#{@degiro_url}/login/secure/config"
     headers = [{"Cookie", "#{sessionId};"}]
 
     case HTTPoison.get(url, headers) do
       {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> Poison.decode!(body)
-      _ -> IO.puts("Login update config error")
+      _ -> {:error, "Login update config error"}
     end
   end
 
@@ -178,7 +266,7 @@ defmodule Degiro.Api do
         |> Map.merge(urls)
 
       _ ->
-        IO.puts("Login get client info error")
+        {:error, "Login get client info error"}
     end
   end
 
